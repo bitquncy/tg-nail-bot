@@ -1,10 +1,35 @@
 import logging
 import time
+import json
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 _start_time = None
+_COUNTERS = {
+    "bookings_created": 0,
+    "bookings_cancelled": 0,
+    "reminders_sent": 0,
+    "backup_success": 0,
+    "backup_failed": 0,
+}
+
+
+def increment_counter(name: str, amount: int = 1) -> None:
+    _COUNTERS[name] = _COUNTERS.get(name, 0) + amount
+
+
+def get_metrics() -> dict:
+    return dict(_COUNTERS)
+
+
+def log_event(logger_obj, event: str, **fields) -> None:
+    payload = {"event": event, **fields}
+    logger_obj.info(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def log_payment_placeholder(action: str = "not_implemented", **fields) -> None:
+    log_event(logger, "payment_placeholder", action=action, **fields)
 
 
 def start_monitoring():
@@ -73,22 +98,35 @@ async def check_scheduler_health() -> bool:
         return False
 
 
+async def check_scheduler_lock_status() -> dict:
+    try:
+        import storage
+        return await storage.get_scheduler_lock_status("scheduler")
+    except Exception as e:
+        logger.error(f"Scheduler lock status check failed: {e}")
+        return {"lock_name": "scheduler", "locked": False, "status": "error", "error": str(e)}
+
+
 async def get_health_status() -> dict:
     """Get comprehensive health status with real checks."""
     uptime = get_uptime()
     db_ok = await check_db_health()
     storage_ok = await check_storage_health()
     scheduler_ok = await check_scheduler_health()
-    all_ok = db_ok and storage_ok and scheduler_ok
+    scheduler_lock = await check_scheduler_lock_status()
+    lock_ok = scheduler_lock.get("status") != "error"
+    all_ok = db_ok and storage_ok and scheduler_ok and lock_ok
     return {
         "status": "ok" if all_ok else "degraded",
         "uptime_seconds": round(uptime, 2),
         "uptime_human": format_uptime(uptime),
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "metrics": get_metrics(),
         "checks": {
             "database": "ok" if db_ok else "error",
             "storage": "ok" if storage_ok else "error",
             "scheduler": "ok" if scheduler_ok else "error",
+            "scheduler_lock": scheduler_lock,
         }
     }
 

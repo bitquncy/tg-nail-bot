@@ -1,6 +1,8 @@
 import html
 import logging
 import asyncio
+import os
+import uuid
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -15,6 +17,75 @@ import config
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone=ZoneInfo(config.TIMEZONE))
+SCHEDULER_LOCK_OWNER = os.getenv("INSTANCE_ID", f"scheduler-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+
+
+async def _run_with_scheduler_lock(lock_name: str, job_name: str, callback, *args) -> bool:
+    acquired = await storage.acquire_scheduler_lock(
+        lock_name,
+        SCHEDULER_LOCK_OWNER,
+        ttl_seconds=config.SCHEDULER_LOCK_TTL_SECONDS,
+    )
+    if not acquired:
+        logger.info(
+            "scheduler lock busy; skipping tick",
+            extra={"event": "scheduler_lock_busy", "job": job_name, "lock_name": lock_name},
+        )
+        return False
+    try:
+        await callback(*args)
+        return True
+    finally:
+        released = await storage.release_scheduler_lock(lock_name, SCHEDULER_LOCK_OWNER)
+        if not released:
+            logger.warning(
+                "scheduler lock release skipped",
+                extra={"event": "scheduler_lock_release_skipped", "job": job_name, "lock_name": lock_name},
+            )
+
+
+async def _run_persisted_scheduler_job(job_id: str, job_name: str, callback, *args) -> bool:
+    lock_name = f"scheduler_job:{job_id}"
+    async def _run_once():
+        persisted = await storage.get_scheduler_job(job_id)
+        if not persisted:
+            logger.info(
+                "scheduler job already handled; skipping",
+                extra={"event": "scheduler_job_missing", "job": job_name, "job_id": job_id},
+            )
+            return
+        await callback(*args)
+        await storage.remove_scheduler_job(job_id)
+
+    return await _run_with_scheduler_lock(lock_name, job_name, _run_once)
+
+
+async def run_reminder_24h_job(bot, booking: dict):
+    return await _run_persisted_scheduler_job(
+        f"reminder_24h_{booking['id']}", "reminder_24h", send_reminder_24h, bot, booking
+    )
+
+
+async def run_reminder_2h_job(bot, booking: dict):
+    return await _run_persisted_scheduler_job(
+        f"reminder_2h_{booking['id']}", "reminder_2h", send_reminder_2h, bot, booking
+    )
+
+
+async def run_auto_complete_job(bot, booking: dict):
+    return await _run_persisted_scheduler_job(
+        f"auto_complete_{booking['id']}", "auto_complete", auto_complete_booking, bot, booking
+    )
+
+
+async def run_review_job(bot, booking: dict):
+    return await _run_persisted_scheduler_job(
+        f"review_{booking['id']}", "review", send_review_request, bot, booking
+    )
+
+
+async def _run_periodic_scheduler_job(job_name: str, callback, *args) -> bool:
+    return await _run_with_scheduler_lock(f"scheduler_periodic:{job_name}", job_name, callback, *args)
 
 
 async def auto_complete_booking(bot, booking: dict):
@@ -71,6 +142,12 @@ async def send_reminder_24h(bot, booking: dict):
             reply_markup=keyboards.remind_kb(booking["id"]),
             parse_mode="HTML",
         )
+        try:
+            from monitoring import increment_counter, log_event
+            increment_counter("reminders_sent")
+            log_event(logger, "reminder_sent", reminder_type="24h", booking_id=booking["id"])
+        except Exception:
+            pass
     except TelegramForbiddenError:
         # BUG-M2 FIX: cancel all future reminders to avoid log spam
         logger.warning(f"User {booking['telegram_id']} blocked bot - cancelling reminders for booking {booking['id']}")
@@ -95,6 +172,12 @@ async def send_reminder_2h(bot, booking: dict):
             reply_markup=keyboards.remind_2h_kb(booking["id"]),
             parse_mode="HTML",
         )
+        try:
+            from monitoring import increment_counter, log_event
+            increment_counter("reminders_sent")
+            log_event(logger, "reminder_sent", reminder_type="2h", booking_id=booking["id"])
+        except Exception:
+            pass
     except TelegramForbiddenError:
         # BUG-M2 FIX: cancel future reminders
         logger.warning(f"User {booking['telegram_id']} blocked bot - cancelling reminders for booking {booking['id']}")
@@ -143,7 +226,7 @@ async def schedule_reminders(bot, booking: dict):
             job_id = f"reminder_24h_{booking['id']}"
             await _save_job(job_id, reminder_24h.isoformat(), "reminder_24h", booking["id"])
             scheduler.add_job(
-                send_reminder_24h,
+                run_reminder_24h_job,
                 trigger=DateTrigger(run_date=reminder_24h),
                 args=[bot, booking],
                 id=job_id,
@@ -156,7 +239,7 @@ async def schedule_reminders(bot, booking: dict):
             job_id = f"reminder_2h_{booking['id']}"
             await _save_job(job_id, reminder_2h.isoformat(), "reminder_2h", booking["id"])
             scheduler.add_job(
-                send_reminder_2h,
+                run_reminder_2h_job,
                 trigger=DateTrigger(run_date=reminder_2h),
                 args=[bot, booking],
                 id=job_id,
@@ -164,12 +247,14 @@ async def schedule_reminders(bot, booking: dict):
             )
             logger.info(f"Scheduled 2h reminder for booking {booking['id']} at {reminder_2h}")
 
-        # Auto-complete booking 30 minutes after visit time
-        completion_time = visit_datetime + timedelta(minutes=30)
+        # Auto-complete after the service duration has elapsed.
+        completion_time = visit_datetime + timedelta(
+            minutes=storage.normalize_duration_minutes(booking.get("duration_minutes"))
+        )
         job_id = f"auto_complete_{booking['id']}"
         await _save_job(job_id, completion_time.isoformat(), "auto_complete", booking["id"])
         scheduler.add_job(
-            auto_complete_booking,
+            run_auto_complete_job,
             trigger=DateTrigger(run_date=completion_time),
             args=[bot, booking],
             id=job_id,
@@ -181,7 +266,7 @@ async def schedule_reminders(bot, booking: dict):
         job_id = f"review_{booking['id']}"
         await _save_job(job_id, review_time.isoformat(), "review", booking["id"])
         scheduler.add_job(
-            send_review_request,
+            run_review_job,
             trigger=DateTrigger(run_date=review_time),
             args=[bot, booking],
             id=job_id,
@@ -212,10 +297,11 @@ async def start_scheduler(bot):
         
         # Schedule daily cleanup of old bookings (runs at 3 AM daily)
         scheduler.add_job(
-            cleanup_old_bookings_job,
+            _run_periodic_scheduler_job,
             trigger='cron',
             hour=3,
             minute=0,
+            args=['cleanup_old_bookings', cleanup_old_bookings_job],
             id='cleanup_old_bookings',
             replace_existing=True,
         )
@@ -223,10 +309,11 @@ async def start_scheduler(bot):
 
         # MED-006 FIX: Schedule daily backup at 3:30 AM instead of running at startup
         scheduler.add_job(
-            backup_database_job,
+            _run_periodic_scheduler_job,
             trigger='cron',
             hour=3,
             minute=30,
+            args=['daily_backup', backup_database_job],
             id='daily_backup',
             replace_existing=True,
         )
@@ -234,13 +321,25 @@ async def start_scheduler(bot):
 
         # BUG-C4 FIX: Periodic cleanup of expired slot_locks every 2 minutes
         scheduler.add_job(
-            cleanup_slot_locks_job,
+            _run_periodic_scheduler_job,
             trigger='interval',
             minutes=2,
+            args=['cleanup_slot_locks', cleanup_slot_locks_job],
             id='cleanup_slot_locks',
             replace_existing=True,
         )
         logger.info("Scheduled periodic slot_locks cleanup every 2 minutes")
+
+        scheduler.add_job(
+            _run_periodic_scheduler_job,
+            trigger='cron',
+            hour=max(0, min(23, config.DAILY_DIGEST_HOUR)),
+            minute=max(0, min(59, config.DAILY_DIGEST_MINUTE)),
+            args=['daily_business_digest', send_daily_digest_job, bot],
+            id='daily_business_digest',
+            replace_existing=True,
+        )
+        logger.info("Scheduled daily business digest")
         
         # Recovery: load jobs from DB and reschedule them
         try:
@@ -273,7 +372,7 @@ async def start_scheduler(bot):
                     # Reschedule the job based on type
                     if job_type == "reminder_24h":
                         scheduler.add_job(
-                            send_reminder_24h,
+                            run_reminder_24h_job,
                             trigger=DateTrigger(run_date=run_date),
                             args=[bot, booking],
                             id=job["id"],
@@ -282,7 +381,7 @@ async def start_scheduler(bot):
                         recovered += 1
                     elif job_type == "reminder_2h":
                         scheduler.add_job(
-                            send_reminder_2h,
+                            run_reminder_2h_job,
                             trigger=DateTrigger(run_date=run_date),
                             args=[bot, booking],
                             id=job["id"],
@@ -291,7 +390,7 @@ async def start_scheduler(bot):
                         recovered += 1
                     elif job_type == "auto_complete":
                         scheduler.add_job(
-                            auto_complete_booking,
+                            run_auto_complete_job,
                             trigger=DateTrigger(run_date=run_date),
                             args=[bot, booking],
                             id=job["id"],
@@ -300,7 +399,7 @@ async def start_scheduler(bot):
                         recovered += 1
                     elif job_type == "review":
                         scheduler.add_job(
-                            send_review_request,
+                            run_review_job,
                             trigger=DateTrigger(run_date=run_date),
                             args=[bot, booking],
                             id=job["id"],
@@ -320,8 +419,8 @@ async def start_scheduler(bot):
 async def cleanup_old_bookings_job():
     """Daily job to cleanup old bookings"""
     try:
-        deleted = await storage.cleanup_old_bookings(days=90)
-        logger.info(f"Cleaned up {deleted} old bookings (older than 90 days)")
+        deleted = await storage.cleanup_old_bookings(days=config.PRIVACY_RETENTION_DAYS)
+        logger.info(f"Cleaned up {deleted} old bookings (older than {config.PRIVACY_RETENTION_DAYS} days)")
     except Exception as e:
         logger.error(f"Failed to cleanup old bookings: {e}")
 
@@ -333,10 +432,34 @@ async def cleanup_slot_locks_job():
     Prevents ghost-locked slots when users abandon booking mid-flow."""
     try:
         deleted = await storage.cleanup_expired_slot_locks()
+        await storage.cleanup_expired_scheduler_locks()
         if deleted:
             logger.debug(f"cleanup_slot_locks_job: cleared {deleted} expired lock(s)")
     except Exception as e:
         logger.error(f"cleanup_slot_locks_job failed: {e}")
+
+
+async def send_daily_digest_job(bot):
+    """Send core business metrics to admins once per day."""
+    if not config.ADMIN_IDS:
+        return
+    try:
+        stats = await storage.get_stats()
+        text = (
+            f"{E.CHART} <b>Ежедневный дайджест</b>\n\n"
+            f"{E.LIST} Всего записей: <b>{stats['total']}</b>\n"
+            f"{E.CHECK} Активных: <b>{stats['active']}</b>\n"
+            f"{E.CROSS} Отменённых: <b>{stats['cancelled']}</b>\n"
+            f"{E.CHECK} Завершённых: <b>{stats['completed']}</b>\n"
+            f"{E.MONEY} Выручка: <b>{stats['revenue']:,} ₸</b>"
+        ).replace(",", " ")
+        for admin_id in config.ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"Daily digest failed for admin {admin_id}: {e}")
+    except Exception as e:
+        logger.error(f"send_daily_digest_job failed: {e}")
 
 def shutdown_scheduler():
     if scheduler.running:
@@ -351,9 +474,15 @@ async def backup_database_job():
     """MED-006 FIX: Daily backup job at 3:30 AM - moved from startup to scheduler.
     Runs in thread pool to avoid blocking event loop."""
     import asyncio
-    from backup import backup_database, cleanup_old_backups
+    from backup import backup_database, cleanup_old_backups, restore_check
     try:
-        await asyncio.to_thread(backup_database)
+        backup_file = await asyncio.to_thread(backup_database)
+        if backup_file:
+            restore_ok = await asyncio.to_thread(restore_check, backup_file)
+            logger.info(
+                "Scheduled backup restore-check completed: %s",
+                "ok" if restore_ok else "failed",
+            )
         await asyncio.to_thread(cleanup_old_backups)
         logger.info("Scheduled daily backup completed")
     except Exception as e:

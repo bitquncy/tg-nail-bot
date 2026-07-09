@@ -30,11 +30,7 @@ services:
       - nailshop_backups:/app/backups
     # H-2 FIX: check bot process is alive, not just that a file can be created
     healthcheck:
-      test:
-        - "CMD"
-        - "python"
-        - "-c"
-        - "import subprocess,sys; r=subprocess.run([\"pgrep\",\"-f\",\"bot.py\"],capture_output=True); sys.exit(0 if r.returncode==0 else 1)"
+      test: ["CMD", "python", "healthcheck.py"]
       interval: 60s
       timeout: 10s
       retries: 3

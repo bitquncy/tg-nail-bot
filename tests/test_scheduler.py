@@ -98,8 +98,9 @@ class TestCleanupSlotLocksJob:
         past = (datetime.now() - timedelta(minutes=10)).isoformat()
         async with aiosqlite.connect(config.DB_PATH) as conn:
             await conn.execute(
-                "INSERT INTO slot_locks VALUES (?,?,?,?,?)",
-                ("2026-12-01", "10:00", "Alibek", past, past)
+                "INSERT INTO slot_locks (date, time, master, master_key, owner_id, owner_token, locked_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("2026-12-01", "10:00", "default", "default", None, "", past, past)
             )
             await conn.commit()
         await scheduler.cleanup_slot_locks_job()

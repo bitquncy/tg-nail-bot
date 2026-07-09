@@ -47,11 +47,12 @@ _RX_INSERT_OR_IGNORE = re.compile(
 )
 
 class DBConn:
-    __slots__ = ("_conn", "_is_pg")
+    __slots__ = ("_conn", "_is_pg", "_tx_depth")
 
     def __init__(self, conn, is_pg: bool):
         self._conn = conn
         self._is_pg = is_pg
+        self._tx_depth = 0
 
     async def fetch(self, sql: str, *a) -> list[dict]:
         if self._is_pg:
@@ -105,7 +106,8 @@ class DBConn:
         else:
             async with self._conn.execute(sql, a) as cur:
                 count = cur.rowcount
-            await self._conn.commit()
+            if self._tx_depth == 0:
+                await self._conn.commit()
             return count if count >= 0 else 0
 
     async def upsert(self, table: str, conflict_cols: list[str], data: dict) -> None:
@@ -138,6 +140,7 @@ class DBConn:
             async with self._conn.transaction():
                 yield self
         else:
+            self._tx_depth += 1
             await self._conn.execute("BEGIN EXCLUSIVE")
             try:
                 yield self
@@ -145,6 +148,8 @@ class DBConn:
             except Exception:
                 await self._conn.execute("ROLLBACK")
                 raise
+            finally:
+                self._tx_depth -= 1
 
 
 @asynccontextmanager

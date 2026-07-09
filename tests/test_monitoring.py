@@ -112,10 +112,13 @@ async def test_health_ok():
     monitoring.start_monitoring()
     with (patch.object(monitoring, "check_db_health", AsyncMock(return_value=True)),
          patch.object(monitoring, "check_storage_health", AsyncMock(return_value=True)),
-         patch.object(monitoring, "check_scheduler_health", AsyncMock(return_value=True))):
+         patch.object(monitoring, "check_scheduler_health", AsyncMock(return_value=True)),
+         patch.object(monitoring, "check_scheduler_lock_status", AsyncMock(return_value={"status": "free", "locked": False}))):
         s = await monitoring.get_health_status()
     assert s["status"] == "ok"
     assert s["checks"]["database"] == "ok"
+    assert s["checks"]["scheduler_lock"]["status"] == "free"
+    assert "metrics" in s
 
 @pytest.mark.asyncio
 async def test_health_degraded():
@@ -123,6 +126,31 @@ async def test_health_degraded():
     monitoring.start_monitoring()
     with (patch.object(monitoring, "check_db_health", AsyncMock(return_value=False)),
          patch.object(monitoring, "check_storage_health", AsyncMock(return_value=True)),
-         patch.object(monitoring, "check_scheduler_health", AsyncMock(return_value=True))):
+         patch.object(monitoring, "check_scheduler_health", AsyncMock(return_value=True)),
+         patch.object(monitoring, "check_scheduler_lock_status", AsyncMock(return_value={"status": "free", "locked": False}))):
         s = await monitoring.get_health_status()
     assert s["status"] == "degraded"
+
+@pytest.mark.asyncio
+async def test_scheduler_lock_status_in_health(db):
+    import monitoring
+    import storage
+    await storage.acquire_scheduler_lock("scheduler", "owner", ttl_seconds=60)
+    status = await monitoring.check_scheduler_lock_status()
+    assert status["status"] == "held"
+    assert status["owner"] == "owner"
+
+def test_metrics_increment_and_copy():
+    import monitoring
+    before = monitoring.get_metrics().get("bookings_created", 0)
+    monitoring.increment_counter("bookings_created")
+    metrics = monitoring.get_metrics()
+    assert metrics["bookings_created"] == before + 1
+    metrics["bookings_created"] = -1
+    assert monitoring.get_metrics()["bookings_created"] == before + 1
+
+def test_payment_placeholder_logs():
+    import monitoring
+    with patch.object(monitoring, "log_event") as log_mock:
+        monitoring.log_payment_placeholder("disabled", booking_id="b1")
+    log_mock.assert_called_once()

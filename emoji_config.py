@@ -11,6 +11,19 @@ https://t.me/addemoji/tgmacicons
 4. Скопируйте ID из ответа бота
 """
 
+import os
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Plain Unicode is the safe default. Enable Premium tg-emoji only explicitly.
+USE_PREMIUM_EMOJI = _env_bool("USE_PREMIUM_EMOJI", False)
+
 # Маппинг Unicode эмодзи -> ID кастомного эмодзи
 CUSTOM_EMOJIS = {
     # Основные - интерфейс
@@ -66,7 +79,7 @@ CUSTOM_EMOJIS = {
     "🎯": "5258152182150077732",  # Цель, специализация
     "🤚": "5260249440450520061",  # Стоп/рука - PREMIUM EMOJI
     "👩‍🎨": "5258215635996908355",  # Художник женщина/мастер - PREMIUM EMOJI
-    "💈": "5258215635996908355",  # Барбер полюс (барбершоп)
+    "💈": "5258215635996908355",  # Салон красоты / студия маникюра
     
     # Информация
     "ℹ️": "5258503720928288433",  # Информация - PREMIUM EMOJI
@@ -78,7 +91,7 @@ CUSTOM_EMOJIS = {
     "☎️": "5258337316715373336",  # Телефон альт - PREMIUM EMOJI
     "📱": "5258337316715373336",  # Мобильный телефон - PREMIUM EMOJI
     "🏠": "5257963315258204021",  # Дом (главное меню) - PREMIUM EMOJI
-    "👨‍💼": "5260399854500191689",  # Мастер/Барбер - PREMIUM EMOJI
+    "👨‍💼": "5260399854500191689",  # Мастер - PREMIUM EMOJI
     "👨‍🎨": "5258450450448915742",  # Ножницы (стрижка)
     "📊": "5258330865674494479",  # График, статистика, анализ - PREMIUM EMOJI
 }
@@ -103,6 +116,9 @@ def emoji(unicode_emoji: str, fallback: bool = True) -> str:
         >>> emoji("🔥")  # Если нет в маппинге
         '🔥'
     """
+    if not USE_PREMIUM_EMOJI:
+        return unicode_emoji if fallback else ""
+
     emoji_id = CUSTOM_EMOJIS.get(unicode_emoji)
     
     if emoji_id and emoji_id != "ЗАМЕНИТЕ_НА_REAL_ID":

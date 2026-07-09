@@ -20,8 +20,38 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def _booking_duration_text(booking: dict) -> str:
+    duration = storage.normalize_duration_minutes(
+        booking.get("duration_minutes") or config.get_service_duration(booking.get("service", ""))
+    )
+    return f"{duration} мин"
+
+
 class ContactStates(StatesGroup):
     waiting_contact = State()
+
+
+def _normalize_phone(raw_phone: str) -> str | None:
+    cleaned = re.sub(r"[\s\-\(\)]", "", raw_phone.strip())
+    country_code = config.PHONE_COUNTRY_CODE
+    national_digits = config.PHONE_NATIONAL_DIGITS
+
+    if country_code == "7" and cleaned.startswith("8") and len(cleaned) == national_digits + 1:
+        cleaned = "7" + cleaned[1:]
+    elif not cleaned.startswith("+") and len(cleaned) == national_digits:
+        cleaned = country_code + cleaned
+
+    if cleaned.startswith("+"):
+        digits = cleaned[1:]
+    else:
+        digits = cleaned
+
+    expected_len = len(country_code) + national_digits
+    if not digits.isdigit() or not digits.startswith(country_code) or len(digits) != expected_len:
+        return None
+    if len(digits) > 15:
+        return None
+    return f"+{digits}"
 
 
 @router.message(CommandStart())
@@ -86,7 +116,7 @@ async def cmd_start(message: Message, state: FSMContext):
                 logger.error(f"Failed to process referral: {e}")
 
     # TASK-10: Remove phone barrier - show main menu immediately, ask for phone later
-    text = messages.welcome_text(config.BARBERSHOP_NAME)
+    text = messages.welcome_text(config.SALON_NAME)
     await send_with_retry(
         message.bot, message.chat.id,
         text,
@@ -100,19 +130,19 @@ async def cmd_start(message: Message, state: FSMContext):
 async def handle_contact(message: Message, state: FSMContext):
     phone = None
     if message.contact:
-        phone = message.contact.phone_number
+        phone = _normalize_phone(message.contact.phone_number)
+        if phone is None:
+            await send_with_retry(
+                message.bot, message.chat.id,
+                f"{E.CROSS} Номер из контакта не соответствует ожидаемому формату.\n"
+                f"Введите в формате: <code>+7 700 123 45 67</code>.",
+                parse_mode="HTML",
+            )
+            return
     elif message.text:
         # MED-001 FIX: Allow manual phone number input with validation
-        raw = message.text.strip()
-        cleaned = re.sub(r"[\s\-\(\)]", "", raw)
-        if re.match(r"^\+?[7-8]\d{10}$", cleaned) or re.match(r"^\+?\d{10,15}$", cleaned):
-            # Normalize: ensure starts with +
-            if cleaned.startswith("8") and len(cleaned) == 11:
-                cleaned = "+7" + cleaned[1:]
-            elif not cleaned.startswith("+"):
-                cleaned = "+" + cleaned
-            phone = cleaned
-        else:
+        phone = _normalize_phone(message.text)
+        if phone is None:
             await send_with_retry(
                 message.bot, message.chat.id,
                 f"{E.CROSS} Неверный формат номера.\n"
@@ -194,6 +224,7 @@ async def cb_my_bookings(callback: CallbackQuery):
         text += f"<b>{i}. {date_str} в {b['time']}</b>\n"
         text += f"   {E.MASTER} Мастер: {b['master']}\n"
         text += f"   {E.BARBER} Услуга: {b['service']}\n"
+        text += f"   {E.CLOCK} Длительность: {_booking_duration_text(b)}\n"
         text += f"   {E.MONEY} Цена: {b['price']:,} ₸\n".replace(",", " ")
         text += f"   {E.ID} ID: <code>{b['id']}</code>\n\n"
     
@@ -220,6 +251,7 @@ async def cb_booking_detail(callback: CallbackQuery):
     text = f"{E.LIST} <b>Детали записи</b>\n\n"
     text += f"{E.CALENDAR} <b>Дата:</b> {date_str}\n"
     text += f"{E.CLOCK} <b>Время:</b> {booking['time']}\n"
+    text += f"{E.CLOCK} <b>Длительность:</b> {_booking_duration_text(booking)}\n"
     text += f"{E.MASTER} <b>Мастер:</b> {booking['master']}\n"
     text += f"{E.BARBER} <b>Услуга:</b> {booking['service']}\n"
     text += f"{E.MONEY} <b>Цена:</b> {booking['price']:,} ₸\n".replace(",", " ")
@@ -324,7 +356,9 @@ async def cb_confirm_cancel(callback: CallbackQuery):
         await notify_admins(bot, cancel_text)
         
         # Проверяем лист ожидания
-        waitlist = await storage.get_waitlist_for_slot(booking["date"], booking["time"], booking["master"])
+        waitlist = await storage.get_waitlist_for_open_period(
+            booking["date"], booking["master"], booking["time"], booking.get("duration_minutes")
+        )
         for wl in waitlist:
             try:
                 wl_text = f"{E.STAR} <b>Освободилось время!</b>\n\n"
@@ -378,23 +412,10 @@ async def cmd_me(message: Message):
         for b in bookings:
             date_str = keyboards._format_date(b['date'])
             text += f"• {date_str} в {b['time']}\n"
-            text += f"  {E.MASTER} {b['master']} — {b['service']}\n\n"
+            text += f"  {E.BARBER} {b['service']}\n"
+            text += f"  {E.CLOCK} {_booking_duration_text(b)}\n\n"
 
     await send_with_retry(message.bot, message.chat.id, text, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
-
-
-@router.message(Command("master"))
-async def cmd_master(message: Message):
-    text = f"{E.MASTER} <b>Наши нейл-мастера:</b>\n\n"
-    if config.MASTERS:
-        for name, info in config.MASTERS.items():
-            text += f"<b>{name}</b>\n"
-            text += f"{E.CHART} Опыт: {info['experience']}\n"
-            text += f"{E.SCISSORS} Специализация: {info['specialization']}\n\n"
-        text += "👇 Выберите нейл-мастера для подробностей:"
-    else:
-        text = "Нейл-мастеров пока нет."
-    await send_with_retry(message.bot, message.chat.id, text, reply_markup=keyboards.masters_kb(), parse_mode="HTML")
 
 
 @router.message(Command("help"))
@@ -406,17 +427,17 @@ async def cmd_help(message: Message):
         "<b>Основные команды:</b>",
         "• /start - Главное меню",
         "• /me - Информация о вас и ваших записях",
-        "• /master - Показать всех нейл-мастеров",
+        "• /about - О мастере\n"
+        "• /contacts - Контакты и соц.сети",
         "• /waitlist - Мои записи в листе ожидания",
         "• /cancel - Отменить запись (с указанием ID)",
         "• /help - Эта справка",
         f"<b>{E.IDEA} Как записаться:</b>",
         f"1. Нажмите «{E.SCISSORS} Записаться» в главном меню",
-        "2. Выберите нейл-мастера",
-        "3. Выберите услугу",
-        "4. Выберите дату и время",
-        "5. Введите ваше имя",
-        "6. Подтвердите запись",
+        "2. Выберите услугу",
+        "3. Выберите дату и время",
+        "4. Введите ваше имя",
+        "5. Подтвердите запись",
         "",
         f"<b>{E.LIST} Мои записи:</b>",
         "• Просмотр всех активных записей",
@@ -424,7 +445,7 @@ async def cmd_help(message: Message):
         "• Безопасная отмена с подтверждением",
         "",
         f"<b>{E.PHONE} Если возникли вопросы:</b>",
-        f"Используйте кнопку «{E.PHONE} Позвонить нам» в главном меню.",
+        f"Используйте кнопку «{E.PHONE} Контакты» в главном меню.",
     ]
     text = "\n".join(lines)
     await send_with_retry(message.bot, message.chat.id, text, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
@@ -454,7 +475,8 @@ async def cmd_waitlist(message: Message):
             date_str = keyboards._format_date(w['date'])
             text += f"<b>{i}. {date_str} в {w['time']}</b>\n"
             text += f"   {E.MASTER} Нейл-мастер: {html.escape(w['master'])}\n"
-            text += f"   {E.BARBER} Услуга: {html.escape(w['service'])}\n\n"
+            text += f"   {E.BARBER} Услуга: {html.escape(w['service'])}\n"
+            text += f"   {E.CLOCK} Длительность: {_booking_duration_text(w)}\n\n"
         
         text += f"{E.INFO} Мы уведомим вас, когда время освободится!"
         
@@ -478,7 +500,7 @@ async def cmd_waitlist(message: Message):
 @router.callback_query(F.data == "invite_friend")
 async def cb_invite_friend(callback: CallbackQuery):
     """REFERRAL: Персональная реферальная ссылка + статистика.
-    ref_code создаётся для любого пользователя, даже если он ещё не посещал барбершоп.
+    ref_code создаётся для любого пользователя, даже если он ещё не посещал студию.
     E.* (premium tg-emoji) встроены в messages.INVITE_FRIEND напрямую; в кнопках emoji не используются.
     """
     telegram_id = callback.from_user.id
@@ -504,7 +526,7 @@ async def cb_invite_friend(callback: CallbackQuery):
 
         # INVITE_FRIEND_SHARE — для switch_inline_query (почти plain text, не HTML)
         share_text = messages.INVITE_FRIEND_SHARE.format(
-            name=html.escape(config.BARBERSHOP_NAME),
+            name=html.escape(config.SALON_NAME),
             link=ref_link,
         )
 
@@ -539,7 +561,12 @@ async def cmd_cancel_universal(message: Message, state: FSMContext):
         data = await state.get_data()
         if data.get("date") and data.get("time") and data.get("master"):
             try:
-                await storage.release_slot_lock(data["date"], data["time"], data["master"])
+                await storage.release_slot_lock(
+                    data["date"], data["time"], data["master"],
+                    duration_minutes=data.get("duration_minutes"),
+                    owner_id=message.from_user.id,
+                    owner_token=data.get("lock_owner_token"),
+                )
             except Exception:
                 pass
         await state.clear()

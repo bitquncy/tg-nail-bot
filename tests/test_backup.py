@@ -1,6 +1,6 @@
 
 """Tests for backup.py (updated for gzip output)"""
-import os, gzip, pytest
+import os, gzip, pytest, sqlite3
 from unittest.mock import patch, MagicMock
 
 
@@ -8,7 +8,10 @@ def test_backup_database_success(tmp_path):
     """SQLite backup creates a .db.gz file."""
     import backup
     db = tmp_path / "test.db"
-    db.write_bytes(b"SQLite format 3" + b"\x00" * 100)
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, value TEXT)")
+    conn.commit()
+    conn.close()
     with patch("backup._BACKUP_DIR", str(tmp_path / "backups")), \
          patch("backup.config.DB_PATH", str(db)), \
          patch("backup.os.getenv", return_value=""):
@@ -29,17 +32,26 @@ def test_backup_database_missing_db(tmp_path):
 
 
 def test_backup_gzip_content(tmp_path):
-    """Gzip content matches original DB bytes."""
+    """Gzip content is a restorable SQLite snapshot."""
     import backup
-    payload = b"SQLite format 3" + b"Z" * 200
     db = tmp_path / "test.db"
-    db.write_bytes(payload)
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, value TEXT)")
+    conn.execute("INSERT INTO sample (value) VALUES ('ok')")
+    conn.commit()
+    conn.close()
     with patch("backup._BACKUP_DIR", str(tmp_path / "backups")), \
          patch("backup.config.DB_PATH", str(db)), \
          patch("backup.os.getenv", return_value=""):
         result = backup.backup_database()
     with gzip.open(result, "rb") as f:
-        assert f.read() == payload
+        restored = tmp_path / "restored.db"
+        restored.write_bytes(f.read())
+    restored_conn = sqlite3.connect(restored)
+    try:
+        assert restored_conn.execute("SELECT value FROM sample").fetchone()[0] == "ok"
+    finally:
+        restored_conn.close()
 
 
 def test_cleanup_no_dir(tmp_path):
@@ -55,7 +67,7 @@ def test_cleanup_removes_excess(tmp_path):
     bd = tmp_path / "backups"
     bd.mkdir()
     for i in range(35):
-        (bd / f"barbershop_{i:04d}00_000000.db.gz").write_bytes(b"x")
+        (bd / f"nailshop_{i:04d}00_000000.db.gz").write_bytes(b"x")
     with patch("backup._BACKUP_DIR", str(bd)):
         backup.cleanup_old_backups(max_backups=30)
     assert len(list(bd.glob("*.db.gz"))) == 30
@@ -67,7 +79,7 @@ def test_cleanup_below_limit(tmp_path):
     bd = tmp_path / "backups"
     bd.mkdir()
     for i in range(5):
-        (bd / f"barbershop_{i:04d}00_000000.db.gz").write_bytes(b"x")
+        (bd / f"nailshop_{i:04d}00_000000.db.gz").write_bytes(b"x")
     with patch("backup._BACKUP_DIR", str(bd)):
         backup.cleanup_old_backups(max_backups=30)
     assert len(list(bd.glob("*.db.gz"))) == 5

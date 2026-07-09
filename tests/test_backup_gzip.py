@@ -1,6 +1,6 @@
 
 """Tests for updated backup.py: gzip output and PG mock."""
-import gzip, os, pytest, sys, pathlib
+import gzip, os, pytest, sys, pathlib, sqlite3, subprocess
 from unittest.mock import patch, AsyncMock, MagicMock
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
@@ -10,7 +10,10 @@ class TestSqliteBackupGzip:
     def test_creates_db_gz_file(self, tmp_path):
         import backup
         db = tmp_path / "test.db"
-        db.write_bytes(b"SQLite format 3\x00" + b"\x00" * 100)
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY)")
+        conn.commit()
+        conn.close()
         with patch("backup._BACKUP_DIR", str(tmp_path / "backups")), \
              patch("backup.config.DB_PATH", str(db)), \
              patch("backup.os.getenv", return_value=""):
@@ -21,9 +24,12 @@ class TestSqliteBackupGzip:
 
     def test_backup_content_is_valid_gzip(self, tmp_path):
         import backup
-        payload = b"SQLite format 3" + b"X" * 200
         db = tmp_path / "test.db"
-        db.write_bytes(payload)
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT INTO sample (value) VALUES ('ok')")
+        conn.commit()
+        conn.close()
         with patch("backup._BACKUP_DIR", str(tmp_path / "backups")), \
              patch("backup.config.DB_PATH", str(db)), \
              patch("backup.os.getenv", return_value=""):
@@ -31,7 +37,13 @@ class TestSqliteBackupGzip:
         assert result is not None
         with gzip.open(result, "rb") as f:
             content = f.read()
-        assert content == payload
+        restored = tmp_path / "restored.db"
+        restored.write_bytes(content)
+        restored_conn = sqlite3.connect(restored)
+        try:
+            assert restored_conn.execute("SELECT value FROM sample").fetchone()[0] == "ok"
+        finally:
+            restored_conn.close()
 
     def test_returns_none_when_db_missing(self, tmp_path):
         import backup
@@ -44,7 +56,10 @@ class TestSqliteBackupGzip:
     def test_backup_dir_created_if_missing(self, tmp_path):
         import backup
         db = tmp_path / "test.db"
-        db.write_bytes(b"data")
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY)")
+        conn.commit()
+        conn.close()
         backup_dir = tmp_path / "new_backups"
         assert not backup_dir.exists()
         with patch("backup._BACKUP_DIR", str(backup_dir)), \
@@ -59,7 +74,11 @@ class TestPostgresBackupMock:
     def _mock_loop(self, return_value):
         from unittest.mock import MagicMock
         loop = MagicMock()
-        loop.run_until_complete = MagicMock(return_value=return_value)
+        def _run_until_complete(coro):
+            if hasattr(coro, "close"):
+                coro.close()
+            return return_value
+        loop.run_until_complete = MagicMock(side_effect=_run_until_complete)
         loop.close = MagicMock()
         return loop
 
@@ -86,23 +105,42 @@ class TestPostgresBackupMock:
 
     async def test_pg_dump_returns_false_on_connection_error(self, tmp_path):
         import backup
-        with patch("asyncpg.connect", side_effect=ConnectionRefusedError("no server")):
+        with patch("backup.subprocess.run", side_effect=FileNotFoundError("pg_dump")):
             result = await backup._pg_dump("postgresql://localhost/test", str(tmp_path / "dump.sql.gz"))
         assert result is False
 
     async def test_pg_dump_creates_gzip_file(self, tmp_path):
         import backup
-        mock_conn = AsyncMock()
-        mock_conn.fetch.return_value = []
-        mock_conn.close = AsyncMock()
-        with patch("asyncpg.connect", return_value=mock_conn):
-            out_file = str(tmp_path / "dump.sql.gz")
+        from tests.test_production_hardening import _pg_dump_with_required_tables
+
+        completed = subprocess.CompletedProcess(
+            args=["pg_dump"], returncode=0, stdout=_pg_dump_with_required_tables().encode("utf-8"), stderr=b""
+        )
+        out_file = str(tmp_path / "dump.sql.gz")
+        with patch("backup.subprocess.run", return_value=completed):
             result = await backup._pg_dump("postgresql://localhost/test", out_file)
         assert result is True
         assert os.path.exists(out_file)
         with gzip.open(out_file, "rt", encoding="utf-8") as f:
             text = f.read()
-        assert "Barbershop DB dump" in text
+        assert "CREATE TABLE public.booking_slots" in text
+
+    async def test_pg_dump_strips_pg17_transaction_timeout_for_pg16_restore(self, tmp_path):
+        import backup
+        from tests.test_production_hardening import _pg_dump_with_required_tables
+
+        dump = "SET transaction_timeout = 0;\n" + _pg_dump_with_required_tables()
+        completed = subprocess.CompletedProcess(
+            args=["pg_dump"], returncode=0, stdout=dump.encode("utf-8"), stderr=b""
+        )
+        out_file = str(tmp_path / "dump.sql.gz")
+        with patch("backup.subprocess.run", return_value=completed):
+            result = await backup._pg_dump("postgresql://localhost/test", out_file)
+        assert result is True
+        with gzip.open(out_file, "rt", encoding="utf-8") as f:
+            text = f.read()
+        assert "SET transaction_timeout" not in text
+        assert "CREATE TABLE public.booking_slots" in text
 
 
 class TestCleanupUpdated:
@@ -112,7 +150,7 @@ class TestCleanupUpdated:
         bd = tmp_path / "backups"
         bd.mkdir()
         for i in range(35):
-            (bd / f"barbershop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
+            (bd / f"nailshop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
         with patch("backup._BACKUP_DIR", str(bd)):
             backup.cleanup_old_backups(max_backups=30)
         assert len(list(bd.glob("*.db.gz"))) == 30
@@ -122,7 +160,7 @@ class TestCleanupUpdated:
         bd = tmp_path / "backups"
         bd.mkdir()
         for i in range(40):
-            (bd / f"barbershop_{i:04d}0000_000000.sql.gz").write_bytes(b"x")
+            (bd / f"nailshop_{i:04d}0000_000000.sql.gz").write_bytes(b"x")
         with patch("backup._BACKUP_DIR", str(bd)):
             backup.cleanup_old_backups(max_backups=30)
         assert len(list(bd.glob("*.sql.gz"))) == 30
@@ -132,9 +170,9 @@ class TestCleanupUpdated:
         bd = tmp_path / "backups"
         bd.mkdir()
         for i in range(20):
-            (bd / f"barbershop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
+            (bd / f"nailshop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
         for i in range(20):
-            (bd / f"barbershop_{(i+20):04d}0000_000000.sql.gz").write_bytes(b"x")
+            (bd / f"nailshop_{(i+20):04d}0000_000000.sql.gz").write_bytes(b"x")
         with patch("backup._BACKUP_DIR", str(bd)):
             backup.cleanup_old_backups(max_backups=30)
         total = len(list(bd.glob("*.db.gz"))) + len(list(bd.glob("*.sql.gz")))
@@ -146,7 +184,7 @@ class TestCleanupUpdated:
         bd.mkdir()
         (bd / "notes.txt").write_bytes(b"keep me")
         for i in range(5):
-            (bd / f"barbershop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
+            (bd / f"nailshop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
         with patch("backup._BACKUP_DIR", str(bd)):
             backup.cleanup_old_backups(max_backups=10)
         assert (bd / "notes.txt").exists()
@@ -161,7 +199,7 @@ class TestCleanupUpdated:
         bd = tmp_path / "backups"
         bd.mkdir()
         for i in range(5):
-            (bd / f"barbershop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
+            (bd / f"nailshop_{i:04d}0000_000000.db.gz").write_bytes(b"x")
         with patch("backup._BACKUP_DIR", str(bd)):
             backup.cleanup_old_backups(max_backups=30)
         assert len(list(bd.glob("*.db.gz"))) == 5

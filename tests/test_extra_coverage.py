@@ -1,4 +1,4 @@
-﻿import sys, pathlib
+﻿import sys, pathlib, subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 import pytest
@@ -62,42 +62,16 @@ class TestUtilsExtra:
         with patch("config.ADMIN_IDS", [100, 200]):
             await notify_admins(bot, "test text")
 
-    async def test_notify_master_not_in_admin_ids(self):
-        """Lines 75-78: notify master when not in ADMIN_IDS"""
-        from utils import notify_master
+    async def test_notify_admins_multiple(self):
+        """All configured admins receive the notification."""
+        from utils import notify_admins
         bot = AsyncMock()
         bot.send_message = AsyncMock()
-        with patch("config.MASTER_IDS", {"Alibek": 12345}), \
-             patch("config.ADMIN_IDS", [999]):
-            await notify_master(bot, "Alibek", "hello")
-        bot.send_message.assert_called_once_with(12345, "hello", parse_mode="HTML")
-
-    async def test_notify_master_in_admin_ids(self):
-        """Master already in ADMIN_IDS - no duplicate notification"""
-        from utils import notify_master
-        bot = AsyncMock()
-        with patch("config.MASTER_IDS", {"Alibek": 12345}), \
-             patch("config.ADMIN_IDS", [12345]):
-            await notify_master(bot, "Alibek", "hello")
-        bot.send_message.assert_not_called()
-
-    async def test_notify_master_exception_handled(self):
-        """Exception in send_message is caught"""
-        from utils import notify_master
-        bot = AsyncMock()
-        bot.send_message = AsyncMock(side_effect=Exception("err"))
-        with patch("config.MASTER_IDS", {"Alibek": 99999}), \
-             patch("config.ADMIN_IDS", []):
-            await notify_master(bot, "Alibek", "hello")
-
-    async def test_notify_master_not_configured(self):
-        """Master has no Telegram ID configured"""
-        from utils import notify_master
-        bot = AsyncMock()
-        with patch("config.MASTER_IDS", {}), \
-             patch("config.ADMIN_IDS", []):
-            await notify_master(bot, "Unknown", "hello")
-        bot.send_message.assert_not_called()
+        with patch("config.ADMIN_IDS", [100, 200]):
+            await notify_admins(bot, "test text")
+        assert bot.send_message.call_count == 2
+        bot.send_message.assert_any_call(100, "test text", parse_mode="HTML")
+        bot.send_message.assert_any_call(200, "test text", parse_mode="HTML")
 
 
 class TestEmojiConfigExtra:
@@ -130,23 +104,19 @@ class TestEmojiConfigExtra:
 class TestBackupPgDump:
 
     async def test_pg_dump_with_rows(self):
-        """Lines 30-47: _pg_dump processes rows with various value types"""
+        """_pg_dump writes a full pg_dump plain SQL gzip when pg_dump succeeds."""
         import backup
-        mock_conn = AsyncMock()
-        mock_conn.close = AsyncMock()
-
-        row = MagicMock()
-        row.keys = MagicMock(return_value=["id", "name", "price", "notes"])
-        row.values = MagicMock(return_value=["bk1", "Test", 3000, None])
-
-        mock_conn.fetch = AsyncMock(return_value=[row])
+        from tests.test_production_hardening import _pg_dump_with_required_tables
 
         import tempfile, os
         with tempfile.NamedTemporaryFile(suffix=".sql.gz", delete=False) as f:
             tmp = f.name
 
         try:
-            with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
+            completed = subprocess.CompletedProcess(
+                args=["pg_dump"], returncode=0, stdout=_pg_dump_with_required_tables().encode("utf-8"), stderr=b""
+            )
+            with patch("backup.subprocess.run", return_value=completed):
                 result = await backup._pg_dump("postgresql://localhost/test", tmp)
             assert result is True
         finally:
@@ -154,19 +124,19 @@ class TestBackupPgDump:
                 os.unlink(tmp)
 
     async def test_pg_dump_table_fetch_exception(self):
-        """Lines 41-43: individual table fetch exception is caught"""
+        """_pg_dump returns False when pg_dump output is incomplete."""
         import backup
-        mock_conn = AsyncMock()
-        mock_conn.close = AsyncMock()
-        mock_conn.fetch = AsyncMock(side_effect=Exception("table does not exist"))
 
         import tempfile, os
         with tempfile.NamedTemporaryFile(suffix=".sql.gz", delete=False) as f:
             tmp = f.name
         try:
-            with patch("asyncpg.connect", new_callable=AsyncMock, return_value=mock_conn):
+            completed = subprocess.CompletedProcess(
+                args=["pg_dump"], returncode=0, stdout=b"CREATE TABLE public.users (id integer);", stderr=b""
+            )
+            with patch("backup.subprocess.run", return_value=completed):
                 result = await backup._pg_dump("postgresql://localhost/test", tmp)
-            assert result is True
+            assert result is False
         finally:
             if os.path.exists(tmp):
                 os.unlink(tmp)

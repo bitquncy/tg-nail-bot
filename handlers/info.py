@@ -1,115 +1,42 @@
 import html as html_lib
 import logging
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message
-from aiogram.types import CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InputMediaPhoto
 
 import messages
 import keyboards
 import config
+import storage
 from utils import edit_with_retry
-from emoji_config import E, P
+from emoji_config import E
 
 logger = logging.getLogger(__name__)
 
 router = Router()
 
 
-@router.callback_query(F.data == "call")
-async def cb_call(callback: CallbackQuery):
-    try:
-        text = (
-            f"{E.PHONE} <b>Позвонить нам:</b>\n\n"
-            f"{E.PHONE} <b>{html_lib.escape(config.BARBERSHOP_PHONE)}</b>\n\n"
-            f"{E.CLOCK} <b>Часы работы:</b> {html_lib.escape(config.BARBERSHOP_WORKING_HOURS)}"
-        )
-        await edit_with_retry(callback.message, text, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Error in cb_call: {e}")
-    await callback.answer()
-
-@router.callback_query(F.data == "masters")
-async def cb_masters(callback: CallbackQuery):
-    try:
-        text = f"{E.MASTER} <b>Наши нейл-мастера:</b>\n\n"
-        text += "Выберите нейл-мастера для записи:"
-        await edit_with_retry(
-            callback.message,
-            text,
-            reply_markup=keyboards.masters_kb(),
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"Error in cb_masters: {e}")
-        try:
-            await edit_with_retry(callback.message, messages.ERROR, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
-        except Exception:
-            pass
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("master:"))
-async def cb_master_detail(callback: CallbackQuery):
-    import html as html_lib
-    import storage as storage_module
-    master_key = callback.data.split(":", 1)[1]
-    
-    # BUG-008 FIX: Dual-lookup for both index and name-based callbacks
-    master_name = None
-    if master_key.isdigit():
-        # Index-based lookup
-        idx = int(master_key)
-        master_list = list(config.MASTERS.keys())
-        if 0 <= idx < len(master_list):
-            master_name = master_list[idx]
-    else:
-        # Name-based lookup
-        master_name = master_key
-    
-    if not master_name or master_name not in config.MASTERS:
-        await callback.answer(f"{P.CROSS} Нейл-мастер не найден", show_alert=True)
-        return
-    
-    info = config.MASTERS[master_name]
-    try:
-        # BUG-017 FIX: Escape master_name to prevent HTML injection
-        text = f"{E.SCISSORS} <b>{html_lib.escape(master_name)}</b>\n\n"
-        text += f"{E.CHART} <b>Опыт:</b> {html_lib.escape(info['experience'])}\n"
-        text += f"{E.TARGET} <b>Специализация:</b> {html_lib.escape(info['specialization'])}\n\n"
-        
-        # Add work schedule info
-        work_days = await storage_module.get_master_work_days(master_name)
-        day_names = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-        days_str = ", ".join(day_names[d-1] for d in sorted(work_days))
-        text += f"{E.CALENDAR} <b>Работает:</b> {days_str}\n\n"
-        
-        text += "Хотите записаться? Нажмите «Записаться» в главном меню"
-        await edit_with_retry(
-            callback.message,
-            text,
-            reply_markup=keyboards.back_to_main_kb(),
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error(f"Error in cb_master_detail: {e}")
-    await callback.answer()
-
-
 @router.callback_query(F.data == "contacts")
 async def cb_contacts(callback: CallbackQuery):
     try:
-        text = f"{E.LOCATION} <b>Контакты:</b>\n\n"
-        text += f"{E.LOCATION} <b>Адрес:</b>\n{html_lib.escape(config.BARBERSHOP_ADDRESS)}\n\n"
-        text += f"{E.PHONE} <b>Телефон:</b>\n{html_lib.escape(config.BARBERSHOP_PHONE)}\n\n"
-        text += f"{E.CLOCK} <b>Часы работы:</b>\n{html_lib.escape(config.BARBERSHOP_WORKING_HOURS)}\n\n"
-        text += "Для записи нажмите «Записаться» в главном меню"
-        await edit_with_retry(
-            callback.message,
-            text,
-            reply_markup=keyboards.back_to_main_kb(),
-            parse_mode="HTML"
-        )
+        text = f"{E.PHONE} <b>Связаться</b>\n\n"
+        text += f"{E.PHONE} <b>Телефон:</b> {html_lib.escape(config.SALON_PHONE)}\n"
+        text += f"{E.LOCATION} <b>Адрес:</b>\n{html_lib.escape(config.SALON_ADDRESS)}\n\n"
+        text += f"{E.CLOCK} <b>Часы работы:</b>\n{html_lib.escape(config.SALON_WORKING_HOURS)}"
+
+        links = await storage.get_social_links()
+        kb = keyboards.back_to_main_kb()
+        if links:
+            rows = []
+            for i in range(0, len(links), 2):
+                row = []
+                for link in links[i:i+2]:
+                    row.append(InlineKeyboardButton(text=link["platform"], url=link["url"]))
+                rows.append(row)
+            rows.append([InlineKeyboardButton(text="Назад в меню", callback_data="main_menu")])
+            from aiogram.types import InlineKeyboardMarkup
+            kb = InlineKeyboardMarkup(inline_keyboard=rows)
+
+        await edit_with_retry(callback.message, text, reply_markup=kb, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error in cb_contacts: {e}")
     await callback.answer()
@@ -120,10 +47,95 @@ async def cb_prices(callback: CallbackQuery):
     try:
         text = f"{E.MONEY} <b>Услуги и цены:</b>\n\n"
         for name, price in config.SERVICES.items():
-            text += f"• {name} — <b>{price:,} ₸</b>\n".replace(","," ")
-        text += f"\n{E.INFO} Цены могут отличаться в зависимости от нейл-мастера."
+            text += f"• {name} — <b>{price:,} ₸</b>\n".replace(",", " ")
         await edit_with_retry(callback.message, text, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error in cb_prices: {e}")
     await callback.answer()
 
+
+@router.callback_query(F.data == "about_master")
+async def cb_about_master(callback: CallbackQuery):
+    try:
+        text = messages.about_master_text()
+        await edit_with_retry(callback.message, text, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error in cb_about_master: {e}")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "address")
+async def cb_address(callback: CallbackQuery):
+    try:
+        text = (
+            f"{E.LOCATION} <b>Адрес</b>\n\n"
+            f"{html_lib.escape(config.SALON_ADDRESS)}\n\n"
+            f"{E.CLOCK} <b>Часы работы:</b>\n{html_lib.escape(config.SALON_WORKING_HOURS)}"
+        )
+        await edit_with_retry(callback.message, text, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
+        if config.SALON_LOCATION_LAT and config.SALON_LOCATION_LON:
+            try:
+                await callback.message.answer_location(
+                    latitude=config.SALON_LOCATION_LAT,
+                    longitude=config.SALON_LOCATION_LON
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Error in cb_address: {e}")
+    await callback.answer()
+
+
+# ===== ПОРТФОЛИО =====
+
+@router.callback_query(F.data == "portfolio")
+async def cb_portfolio(callback: CallbackQuery):
+    try:
+        photos = await storage.get_portfolio_photos(limit=1, offset=0)
+        links = await storage.get_social_links()
+        if not photos:
+            text = messages.portfolio_empty_text()
+            await edit_with_retry(callback.message, text, reply_markup=keyboards.back_to_main_kb(), parse_mode="HTML")
+            await callback.answer()
+            return
+
+        photo = photos[0]
+        total = await storage.count_portfolio_photos()
+        text = messages.portfolio_caption(1, total, photo.get("caption", ""))
+        await callback.message.edit_text(text, parse_mode="HTML")
+        await callback.message.edit_media(
+            media=InputMediaPhoto(media=photo["file_id"]),
+            reply_markup=keyboards.portfolio_kb(1, has_prev=False, has_next=total > 1, links=links),
+        )
+    except Exception as e:
+        logger.error(f"Error in cb_portfolio: {e}")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("portfolio_page:"))
+async def cb_portfolio_page(callback: CallbackQuery):
+    try:
+        page = int(callback.data.split(":", 1)[1])
+        total = await storage.count_portfolio_photos()
+        if page < 1 or page > total:
+            await callback.answer("Фото не найдено", show_alert=True)
+            return
+
+        photos = await storage.get_portfolio_photos(limit=1, offset=page - 1)
+        if not photos:
+            await callback.answer("Фото не найдено", show_alert=True)
+            return
+
+        links = await storage.get_social_links()
+        photo = photos[0]
+        text = messages.portfolio_caption(page, total, photo.get("caption", ""))
+        await callback.message.edit_text(text, parse_mode="HTML")
+        await callback.message.edit_media(
+            media=InputMediaPhoto(media=photo["file_id"]),
+            reply_markup=keyboards.portfolio_kb(
+                page, has_prev=page > 1, has_next=page < total, links=links
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error in cb_portfolio_page: {e}")
+    await callback.answer()
