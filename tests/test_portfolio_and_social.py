@@ -136,8 +136,8 @@ class TestPortfolioKeyboards:
         )
         assert len(kb.inline_keyboard) >= 2  # nav + back
         texts = [b.text for row in kb.inline_keyboard for b in row]
-        assert "◀ Назад" in texts
-        assert "Далее ▶" in texts
+        assert "Назад" in texts
+        assert "Далее" in texts
         assert "Назад в меню" in texts
 
     def test_portfolio_kb_with_social_links(self):

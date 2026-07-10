@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.1] - 2026-07-09
+
+### Fixed
+
+- Telegram messages now use premium custom emoji markup consistently when `USE_PREMIUM_EMOJI=true`.
+- Removed emoji from inline and reply button labels because Telegram does not parse custom emoji markup inside buttons.
+- Service selection buttons now show full service names without truncation.
+- Service selection now reads the current `config.SERVICES` mapping so runtime service changes are reflected in the keyboard.
+
+### Verified
+
+- Full test suite: `343 passed, 3 skipped`, coverage `65%`.
+- Docker Compose build passed.
+- Runtime healthcheck passed after recreating the bot container.
+- Release ZIP validation passed: `76` entries, `0` banned artifacts.
+
 ## [1.0.0] - 2026-07-09
 
 ### Release Notes

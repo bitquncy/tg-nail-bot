@@ -61,7 +61,7 @@
 
 ## Мёртвый / неиспользуемый / тестовый код
 
-- `emoji_config.py` — импортирует `P`, но нет уверенности, что все Premium-emoji корректно работают без подписки.
+- `emoji_config.py` — Premium emoji включены для HTML-сообщений; `P` оставлен только для plain text contexts, где Telegram не парсит HTML (`show_alert`).
 - `handlers/info.py`: `cb_portfolio` — заглушка "портфолио скоро появится", не реализовано.
 - `handlers/booking.py`: `cb_confirm_deprecated` — устаревший обработчик, не используется в новом флоу.
 - `handlers/booking.py`: два обработчика `cb_back_to_master` и `cb_back_to_service` на одном callback `back_to_service` — конфликт.

@@ -1,7 +1,5 @@
-from emoji_config import E
 from datetime import datetime
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from config import SERVICES
 import config
 import messages
 
@@ -21,34 +19,28 @@ def _safe_cb(prefix: str, value: str, max_bytes: int = 62) -> str:
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=f"{E.SCISSORS} Записаться", callback_data="book"),
-            InlineKeyboardButton(text=f"{E.LIST} Мои записи", callback_data="my_bookings"),
+            InlineKeyboardButton(text="Записаться", callback_data="book"),
+            InlineKeyboardButton(text="Мои записи", callback_data="my_bookings"),
         ],
         [
-            InlineKeyboardButton(text=f"{E.MONEY} Услуги и цены", callback_data="prices"),
-            InlineKeyboardButton(text=f"{E.CAMERA} Портфолио", callback_data="portfolio"),
+            InlineKeyboardButton(text="Услуги и цены", callback_data="prices"),
+            InlineKeyboardButton(text="Портфолио", callback_data="portfolio"),
         ],
         [
-            InlineKeyboardButton(text=f"{E.PHONE} Контакты", callback_data="contacts"),
-            InlineKeyboardButton(text=f"{E.IDEA} О мастере", callback_data="about_master"),
+            InlineKeyboardButton(text="Контакты", callback_data="contacts"),
+            InlineKeyboardButton(text="О мастере", callback_data="about_master"),
         ],
     ])
 
 
 async def services_kb(back: str = "main_menu") -> InlineKeyboardMarkup:
-    service_list = list(SERVICES.keys())
+    service_list = list(config.SERVICES.keys())
     buttons = []
-    for i in range(0, len(service_list), 2):
-        row = []
-        for name in service_list[i:i+2]:
-            price = SERVICES.get(name, 0)
-            display = (name[:14] + "…") if len(name.encode("utf-8")) > 32 else name
-            badge = f"{price:,} ₸ / {config.get_service_duration(name)} мин".replace(",", " ")
-            row.append(InlineKeyboardButton(
-                text=f"{display} — {badge}",
-                callback_data=_safe_cb("service:", name),
-            ))
-        buttons.append(row)
+    for name in service_list:
+        buttons.append([InlineKeyboardButton(
+            text=name,
+            callback_data=_safe_cb("service:", name),
+        )])
     buttons.append([InlineKeyboardButton(text="Назад", callback_data=back)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -147,7 +139,7 @@ def phone_kb() -> ReplyKeyboardMarkup:
 
 
 def review_kb(booking_id: str) -> InlineKeyboardMarkup:
-    labels = ["1 ⭐", "2 ⭐", "3 ⭐", "4 ⭐", "5 ⭐"]
+    labels = ["1", "2", "3", "4", "5"]
     row = [InlineKeyboardButton(text=label, callback_data=f"review:{booking_id}:{i}")
            for i, label in enumerate(labels, start=1)]
     return InlineKeyboardMarkup(inline_keyboard=[row])
@@ -239,19 +231,19 @@ def admin_unavailable_kb(periods: list[dict]) -> InlineKeyboardMarkup:
 def admin_settings_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📍 Адрес", callback_data="admin_change_address"),
-            InlineKeyboardButton(text="📞 Телефон", callback_data="admin_change_phone"),
+            InlineKeyboardButton(text="Адрес", callback_data="admin_change_address"),
+            InlineKeyboardButton(text="Телефон", callback_data="admin_change_phone"),
         ],
         [
-            InlineKeyboardButton(text="🕐 Часы работы", callback_data="admin_change_hours"),
-            InlineKeyboardButton(text="🏷 Название студии", callback_data="admin_change_salon_name"),
+            InlineKeyboardButton(text="Часы работы", callback_data="admin_change_hours"),
+            InlineKeyboardButton(text="Название студии", callback_data="admin_change_salon_name"),
         ],
         [
-            InlineKeyboardButton(text="👩 Имя мастера", callback_data="admin_change_master_name"),
-            InlineKeyboardButton(text="📝 Описание", callback_data="admin_change_master_desc"),
+            InlineKeyboardButton(text="Имя мастера", callback_data="admin_change_master_name"),
+            InlineKeyboardButton(text="Описание", callback_data="admin_change_master_desc"),
         ],
         [
-            InlineKeyboardButton(text="⭐ Опыт", callback_data="admin_change_master_exp"),
+            InlineKeyboardButton(text="Опыт", callback_data="admin_change_master_exp"),
             InlineKeyboardButton(text="Назад", callback_data="admin"),
         ],
     ])
@@ -285,10 +277,10 @@ def cancel_bookings_kb(bookings: list) -> InlineKeyboardMarkup:
         date_str = _format_date(b['date'])
         label = f"{date_str} {b['time']} — {b['service'][:12]}"
         buttons.append([InlineKeyboardButton(
-            text=f"❌ {label}",
+            text=label,
             callback_data=f"cancel_book:{b['id']}"
         )])
-    buttons.append([InlineKeyboardButton(text="← Назад", callback_data="main_menu")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -297,9 +289,9 @@ def portfolio_kb(photo_id: int, has_prev: bool, has_next: bool, links: list[dict
     rows = []
     nav_row = []
     if has_prev:
-        nav_row.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"portfolio_page:{photo_id - 1}"))
+        nav_row.append(InlineKeyboardButton(text="Назад", callback_data=f"portfolio_page:{photo_id - 1}"))
     if has_next:
-        nav_row.append(InlineKeyboardButton(text="Далее ▶", callback_data=f"portfolio_page:{photo_id + 1}"))
+        nav_row.append(InlineKeyboardButton(text="Далее", callback_data=f"portfolio_page:{photo_id + 1}"))
     if nav_row:
         rows.append(nav_row)
 

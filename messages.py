@@ -252,7 +252,7 @@ ADMIN_STATS = (
 )
 
 ADMIN_EXPORT = f"{E.CHECK} Экспорт завершён. Файл: <code>{{filename}}</code>"
-ADMIN_ONLY = "🔒 Команда доступна только администратору."
+ADMIN_ONLY = "Команда доступна только администратору."
 
 
 def get_about_text() -> str:
@@ -316,7 +316,7 @@ ADMIN_PORTFOLIO_DELETE_EMPTY = "В портфолио пока нет фото �
 ADMIN_PORTFOLIO_DELETE_CONFIRM = "Удалить фото #{photo_id}? Это действие нельзя отменить."
 ADMIN_PORTFOLIO_DELETED = "Фото #{photo_id} удалено."
 ADMIN_SOCIAL_LINKS_INTRO = (
-    f"{E.LINK} <b>Социальные сети</b>\n\n"
+    f"{E.INFO} <b>Социальные сети</b>\n\n"
     "Добавляйте ссылки на Instagram, TikTok, WhatsApp и т.п."
 )
 ADMIN_SOCIAL_ADD_PROMPT = (
@@ -327,13 +327,13 @@ ADMIN_SOCIAL_ADD_PROMPT = (
 ADMIN_SOCIAL_LINK_DELETED = "Ссылка удалена."
 
 # ===== КНОПКИ =====
-BACK_BUTTON = f"{E.HOME} Назад"
-CONFIRM_BUTTON = f"{E.CHECK} Подтвердить"
-CANCEL_BUTTON = f"{E.CROSS} Отменить"
-YES_BUTTON = f"{E.CHECK} Приду"
-NO_BUTTON = f"{E.CROSS} Отменить запись"
-PHONE_BUTTON = f"{E.MOBILE} Поделиться номером"
-CALL_BUTTON = f"{E.PHONE} Позвонить"
+BACK_BUTTON = "Назад"
+CONFIRM_BUTTON = "Подтвердить"
+CANCEL_BUTTON = "Отменить"
+YES_BUTTON = "Приду"
+NO_BUTTON = "Отменить запись"
+PHONE_BUTTON = "Поделиться номером"
+CALL_BUTTON = "Позвонить"
 
 
 # ===== РЕФЕРАЛЬНАЯ СИСТЕМА =====

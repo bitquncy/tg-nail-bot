@@ -6,6 +6,7 @@ import os
 import logging
 from pathlib import Path
 from tz_utils import get_now
+from emoji_config import E
 
 logger = logging.getLogger(__name__)
 
@@ -819,7 +820,7 @@ async def _apply_discounts_in_transaction(conn, telegram_id: int, base_price: in
         discount_amount = int(base_price * config.LOYALTY_DISCOUNT_PERCENT / 100)
         final_price -= discount_amount
         info_parts.append(
-            f"⭐ Скидка лояльности {config.LOYALTY_DISCOUNT_PERCENT}% — −{discount_amount:,} ₸".replace(",", " ")
+            f"{E.STAR} Скидка лояльности {config.LOYALTY_DISCOUNT_PERCENT}% — −{discount_amount:,} ₸".replace(",", " ")
         )
 
     bonus_spend = 0
@@ -838,7 +839,7 @@ async def _apply_discounts_in_transaction(conn, telegram_id: int, base_price: in
                 raise _BookingRejected("bonus balance changed during booking")
             final_price -= bonus_spend
             info_parts.append(
-                f"🎁 Бонусы списаны — −{bonus_spend:,} ₸ (осталось: {bonuses - bonus_spend})".replace(",", " ")
+                f"{E.STAR} Бонусы списаны — −{bonus_spend:,} ₸ (осталось: {bonuses - bonus_spend})".replace(",", " ")
             )
 
     return max(0, final_price), "".join(info_parts), bonus_spend

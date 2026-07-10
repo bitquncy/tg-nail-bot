@@ -1,6 +1,6 @@
 # Release Checklist
 
-Release: `v1.0.0`
+Release: `v1.0.1`
 
 Use this checklist immediately before creating the Git tag and delivering the release ZIP.
 
@@ -32,9 +32,9 @@ Use this checklist immediately before creating the Git tag and delivering the re
 
 ☐ Release ZIP
 
-## Expected Evidence For v1.0.0
+## Expected Evidence For v1.0.1
 
-☐ `docker build --no-cache -t nailshop-bot:v1.0.0 .` passes
+☐ `docker build --no-cache -t nailshop-bot:v1.0.1 .` passes
 
 ☐ `docker compose build --no-cache` passes
 
@@ -58,9 +58,9 @@ Use this checklist immediately before creating the Git tag and delivering the re
 
 ☐ README, CHANGELOG, PRODUCTION_RUNBOOK, RELEASE_CHECKLIST, RELEASE_NOTES, and LICENSE are present
 
-☐ Version `1.0.0` is documented in README, CHANGELOG, and release notes
+☐ Version `1.0.1` is documented in README, CHANGELOG, and release notes
 
-☐ Git tag `v1.0.0` is created after final review
+☐ Git tag `v1.0.1` is created after final review
 
 ## Manual Owner Checks
 

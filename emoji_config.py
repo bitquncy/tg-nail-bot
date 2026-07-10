@@ -21,8 +21,9 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# Plain Unicode is the safe default. Enable Premium tg-emoji only explicitly.
-USE_PREMIUM_EMOJI = _env_bool("USE_PREMIUM_EMOJI", False)
+# Premium Telegram custom emoji are the product default. Disable only for local
+# clients that cannot render tg-emoji HTML.
+USE_PREMIUM_EMOJI = _env_bool("USE_PREMIUM_EMOJI", True)
 
 # Маппинг Unicode эмодзи -> ID кастомного эмодзи
 CUSTOM_EMOJIS = {
@@ -37,6 +38,7 @@ CUSTOM_EMOJIS = {
     # Статусы
     "✅": "5260726538302660868",  # Успех, подтверждение - PREMIUM EMOJI (первый вариант)
     "❌": "5260342697075416641",  # Ошибка, отмена - PREMIUM EMOJI
+    "⚠️": "5258474669769497337",  # Предупреждение - PREMIUM EMOJI
     "✓": "5260726538302660868",   # Галочка - PREMIUM EMOJI
     "✗": "5260342697075416641",   # Крестик - PREMIUM EMOJI
     
@@ -97,24 +99,25 @@ CUSTOM_EMOJIS = {
 }
 
 
-def emoji(unicode_emoji: str, fallback: bool = True) -> str:
+def emoji(unicode_emoji: str, fallback: bool = False) -> str:
     """
     Конвертирует Unicode эмодзи в кастомный Telegram эмодзи
     
     Args:
         unicode_emoji: Обычный Unicode эмодзи (например: "👋")
-        fallback: Если True и ID не найден, вернуть обычный эмодзи
+        fallback: Если True и ID не найден, вернуть обычный эмодзи. По умолчанию False,
+            чтобы не смешивать premium emoji с plain Unicode в HTML-сообщениях.
         
     Returns:
         HTML код кастомного эмодзи: <tg-emoji emoji-id="123">👋</tg-emoji>
-        Или обычный эмодзи если ID не найден и fallback=True
+        Или пустую строку, если ID не найден и fallback=False
         
     Examples:
         >>> emoji("👋")
         '<tg-emoji emoji-id="5368324170671202286">👋</tg-emoji>'
         
         >>> emoji("🔥")  # Если нет в маппинге
-        '🔥'
+        ''
     """
     if not USE_PREMIUM_EMOJI:
         return unicode_emoji if fallback else ""
@@ -124,7 +127,7 @@ def emoji(unicode_emoji: str, fallback: bool = True) -> str:
     if emoji_id and emoji_id != "ЗАМЕНИТЕ_НА_REAL_ID":
         return f'<tg-emoji emoji-id="{emoji_id}">{unicode_emoji}</tg-emoji>'
     else:
-        # Fallback на обычный эмодзи
+        # Do not leak plain Unicode into HTML messages unless explicitly requested.
         return unicode_emoji if fallback else ""
 
 

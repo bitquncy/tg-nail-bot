@@ -444,15 +444,15 @@ async def _show_admin_bookings_page(callback, offset: int = 0):
         kb_rows = []
         for b in page_items:
             kb_rows.append([InlineKeyboardButton(
-                text=f"✏️ {b['id']} — {keyboards._format_date(b['date'])} {b['time']}",
+                text=f"{b['id']} — {keyboards._format_date(b['date'])} {b['time']}",
                 callback_data=f"admin_manage_booking:{b['id']}"
             )])
         nav_buttons = []
         if offset > 0:
-            nav_buttons.append(InlineKeyboardButton(text="◄ Назад", callback_data=f"admin_bookings_page:{offset - PAGE}"))
+            nav_buttons.append(InlineKeyboardButton(text="Назад", callback_data=f"admin_bookings_page:{offset - PAGE}"))
         nav_buttons.append(InlineKeyboardButton(text=f"{offset // PAGE + 1}/{(total - 1) // PAGE + 1 if total else 1}", callback_data="noop"))
         if offset + PAGE < total:
-            nav_buttons.append(InlineKeyboardButton(text="Дальше ►", callback_data=f"admin_bookings_page:{offset + PAGE}"))
+            nav_buttons.append(InlineKeyboardButton(text="Дальше", callback_data=f"admin_bookings_page:{offset + PAGE}"))
         if nav_buttons:
             kb_rows.append(nav_buttons)
         kb_rows.append([InlineKeyboardButton(text="Назад в панель", callback_data="admin")])
@@ -788,8 +788,8 @@ async def cb_admin_remove_service(callback: CallbackQuery):
         logger.error(f"Failed to check active bookings for service: {e}")
     confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=f"{E.CHECK} Да, удалить", callback_data=f"admin_confirm_remove_service:{service_name}"),
-            InlineKeyboardButton(text=f"{E.CROSS} Отмена", callback_data=f"admin_service_detail:{service_name}"),
+            InlineKeyboardButton(text="Да, удалить", callback_data=f"admin_confirm_remove_service:{service_name}"),
+            InlineKeyboardButton(text="Отмена", callback_data=f"admin_service_detail:{service_name}"),
         ]
     ])
     await edit_with_retry(
@@ -833,15 +833,15 @@ async def cb_admin_settings(callback: CallbackQuery):
     try:
         text = (
             f"Настройки\n\n"
-            f"🏷 Название: {config.SALON_NAME}\n"
-            f"📍 Адрес: {config.SALON_ADDRESS}\n"
-            f"📞 Телефон: {config.SALON_PHONE}\n"
-            f"🕐 Часы работы: {config.SALON_WORKING_HOURS}\n"
-            f"👩 Мастер: {config.MASTER_NAME}\n"
-            f"⭐ Опыт: {config.MASTER_EXPERIENCE}\n"
-            f"📝 Описание: {config.MASTER_DESCRIPTION}"
+            f"{E.PIN} Название: {config.SALON_NAME}\n"
+            f"{E.LOCATION} Адрес: {config.SALON_ADDRESS}\n"
+            f"{E.PHONE} Телефон: {config.SALON_PHONE}\n"
+            f"{E.CLOCK} Часы работы: {config.SALON_WORKING_HOURS}\n"
+            f"{E.ARTIST_WOMAN} Мастер: {config.MASTER_NAME}\n"
+            f"{E.STAR} Опыт: {config.MASTER_EXPERIENCE}\n"
+            f"{E.NOTE} Описание: {config.MASTER_DESCRIPTION}"
         )
-        await edit_with_retry(callback.message, text, reply_markup=keyboards.admin_settings_kb())
+        await edit_with_retry(callback.message, text, reply_markup=keyboards.admin_settings_kb(), parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error in admin_settings: {e}")
     await callback.answer()
@@ -1156,7 +1156,7 @@ async def cb_admin_pre_cancel(callback: CallbackQuery):
             return
         confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text=f"{E.CROSS} Да, отменить", callback_data=f"admin_cancel:{booking_id}"),
+                InlineKeyboardButton(text="Да, отменить", callback_data=f"admin_cancel:{booking_id}"),
                 InlineKeyboardButton(text="Нет, вернуться", callback_data=f"admin_manage_booking:{booking_id}"),
             ]
         ])
@@ -1197,7 +1197,7 @@ async def cb_admin_cancel_booking(callback: CallbackQuery, bot: Bot):
                         date=keyboards._format_date(booking["date"]),
                         time=booking["time"],
                     )
-                    await bot.send_message(wl["telegram_id"], text)
+                    await bot.send_message(wl["telegram_id"], text, parse_mode="HTML")
                     await storage.update_waitlist_status(wl["id"], "offered")
                 except Exception as e:
                     logger.error(f"Failed to notify waitlist {wl['telegram_id']}: {e}")

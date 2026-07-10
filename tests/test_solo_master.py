@@ -36,10 +36,20 @@ class TestServicesKeyboard:
         }
         try:
             kb = await keyboards.services_kb()
-            # Each service row has up to 2 buttons
-            assert all(len(row) <= 2 for row in kb.inline_keyboard[:-1])
+            # Each service gets the full row so long names do not get cut off early.
+            assert all(len(row) == 1 for row in kb.inline_keyboard[:-1])
             # Last row is back button
             assert any("Назад" in b.text for b in kb.inline_keyboard[-1])
+        finally:
+            config.SERVICES = original
+
+    async def test_services_kb_shows_full_service_name(self):
+        original = dict(config.SERVICES)
+        full_name = "Маникюр + гель-лак"
+        config.SERVICES = {full_name: 5000}
+        try:
+            kb = await keyboards.services_kb()
+            assert kb.inline_keyboard[0][0].text == full_name
         finally:
             config.SERVICES = original
 

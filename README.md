@@ -1,6 +1,6 @@
 # Nailshop Bot
 
-**Release:** v1.0.0
+**Release:** v1.0.1
 **Status:** готов к production deploy после заполнения реального `.env` владельцем проекта.
 
 Telegram-бот для одного nail-мастера: онлайн-запись, услуги и цены, портфолио работ, контакты и социальные сети, управление расписанием через админ-панель.
@@ -53,7 +53,8 @@ python bot.py
 
 - `PRODUCTION_RUNBOOK.md` — пошаговый production runbook: deploy, backup, restore, rollback, recovery.
 - `RELEASE_CHECKLIST.md` — чек-лист перед релизом и Git tag.
-- `RELEASE_NOTES_v1.0.0.md` — краткие release notes для владельца и клиента.
+- `RELEASE_NOTES_v1.0.1.md` — краткие release notes для владельца и клиента.
+- `RELEASE_NOTES_v1.0.0.md` — базовый production release.
 - `CHANGELOG.md` — история изменений и состав релиза.
 
 ## Инструкции для владельца

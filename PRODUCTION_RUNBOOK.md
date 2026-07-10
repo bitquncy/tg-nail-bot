@@ -1,6 +1,6 @@
 # Production Runbook
 
-Release: `v1.0.0`
+Release: `v1.0.1`
 
 This runbook describes the production deployment and recovery process for Nailshop Bot. Use disposable databases for restore drills. Never run restore drills against the production database.
 
@@ -76,7 +76,7 @@ REQUIRE_REDIS_FSM=true
 ## 3. Docker Build
 
 ```powershell
-docker build --no-cache -t nailshop-bot:v1.0.0 .
+docker build --no-cache -t nailshop-bot:v1.0.1 .
 docker compose build --no-cache
 ```
 

@@ -118,7 +118,7 @@ async def _apply_discounts(telegram_id: int, base_price: int) -> tuple[int, str,
                 discount_amount = int(base_price * config.LOYALTY_DISCOUNT_PERCENT / 100)
                 final_price -= discount_amount
                 info_parts.append(
-                    f"⭐ Скидка лояльности {config.LOYALTY_DISCOUNT_PERCENT}% — −{discount_amount:,} ₸".replace(",", " ")
+                    f"{E.STAR} Скидка лояльности {config.LOYALTY_DISCOUNT_PERCENT}% — −{discount_amount:,} ₸".replace(",", " ")
                 )
 
             if bonuses > 0:
@@ -127,7 +127,7 @@ async def _apply_discounts(telegram_id: int, base_price: int) -> tuple[int, str,
                 if bonus_spend > 0:
                     final_price -= bonus_spend
                     info_parts.append(
-                        f"🎁 Бонусы списаны — −{bonus_spend:,} ₸ (осталось: {bonuses - bonus_spend})".replace(",", " ")
+                        f"{E.STAR} Бонусы списаны — −{bonus_spend:,} ₸ (осталось: {bonuses - bonus_spend})".replace(",", " ")
                     )
                     return max(0, final_price), "".join(info_parts), bonus_spend
     except Exception as e:
@@ -882,7 +882,7 @@ async def cb_go_to_waitlist(callback: CallbackQuery, state: FSMContext):
     for i in range(0, len(busy_times), 4):
         row = []
         for time_str in busy_times[i:i+4]:
-            row.append(InlineKeyboardButton(text=f"🔴 {time_str}", callback_data=f"waitlist:{time_str}"))
+            row.append(InlineKeyboardButton(text=time_str, callback_data=f"waitlist:{time_str}"))
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text="Назад", callback_data="back_to_time")])
 
@@ -912,7 +912,7 @@ async def cb_remind_confirm(callback: CallbackQuery, bot: Bot):
         logger.error(f"Failed to notify admin on remind_confirm: {e}")
     try:
         await callback.message.edit_text(
-            f"✅ <b>Отлично!</b> Ждём вас в указанное время.",
+            f"{E.CHECK} <b>Отлично!</b> Ждём вас в указанное время.",
             reply_markup=keyboards.back_to_main_kb(),
             parse_mode="HTML"
         )
@@ -959,7 +959,7 @@ async def cb_remind_cancel(callback: CallbackQuery, bot: Bot):
                     date=keyboards._format_date(booking["date"]),
                     time=booking["time"],
                 )
-                await bot.send_message(wl["telegram_id"], text)
+                await bot.send_message(wl["telegram_id"], text, parse_mode="HTML")
                 await storage.update_waitlist_status(wl["id"], "offered")
             except Exception as e:
                 logger.error(f"Failed to notify waitlist {wl['telegram_id']}: {e}")
@@ -1034,10 +1034,11 @@ async def handle_review_comment(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
     else:
-        await message.answer(
-            f"{E.WARNING} Вы уже оставляли отзыв на эту запись.",
-            reply_markup=keyboards.back_to_main_kb()
-        )
+            await message.answer(
+                f"{E.WARNING} Вы уже оставляли отзыв на эту запись.",
+                reply_markup=keyboards.back_to_main_kb(),
+                parse_mode="HTML"
+            )
 
     await state.clear()
 
@@ -1056,24 +1057,28 @@ async def cb_skip_comment(callback: CallbackQuery, state: FSMContext):
     if saved:
         try:
             await callback.message.edit_text(
-                f"✅ Спасибо за оценку! ⭐ {rating}/5",
-                reply_markup=keyboards.back_to_main_kb()
+                f"{E.CHECK} Спасибо за оценку! {E.STAR} {rating}/5",
+                reply_markup=keyboards.back_to_main_kb(),
+                parse_mode="HTML"
             )
         except Exception:
             await callback.message.answer(
-                f"✅ Спасибо за оценку! ⭐ {rating}/5",
-                reply_markup=keyboards.back_to_main_kb()
+                f"{E.CHECK} Спасибо за оценку! {E.STAR} {rating}/5",
+                reply_markup=keyboards.back_to_main_kb(),
+                parse_mode="HTML"
             )
     else:
         try:
             await callback.message.edit_text(
-                "⚠️ Вы уже оставляли отзыв на эту запись.",
-                reply_markup=keyboards.back_to_main_kb()
+                f"{E.WARNING} Вы уже оставляли отзыв на эту запись.",
+                reply_markup=keyboards.back_to_main_kb(),
+                parse_mode="HTML"
             )
         except Exception:
             await callback.message.answer(
-                "⚠️ Вы уже оставляли отзыв на эту запись.",
-                reply_markup=keyboards.back_to_main_kb()
+                f"{E.WARNING} Вы уже оставляли отзыв на эту запись.",
+                reply_markup=keyboards.back_to_main_kb(),
+                parse_mode="HTML"
             )
 
     await state.clear()

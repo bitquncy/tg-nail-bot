@@ -99,7 +99,7 @@ async def auto_complete_booking(bot, booking: dict):
                 _visits = await storage.update_loyalty(completed["telegram_id"], completed.get("name", ""))
                 if _visits % config.LOYALTY_VISIT_INTERVAL == 0:
                     _reward = (
-                        f"⭐ <b>Поздравляем!</b>\n\n"
+                        f"{E.STAR} <b>Поздравляем!</b>\n\n"
                         f"Это ваш {_visits}-й визит! Скидка {config.LOYALTY_DISCOUNT_PERCENT}% на следующую запись."
                     )
                     try:

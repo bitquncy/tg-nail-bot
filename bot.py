@@ -123,7 +123,7 @@ def _register_dispatcher(dp: Dispatcher, bot: Bot) -> None:
                 try:
                     await bot.send_message(
                         admin_id,
-                        "⚠️ <b>Ошибка бота</b>\n" + f"<pre>{err_text}</pre>",
+                        f"{E.WARNING} <b>Ошибка бота</b>\n" + f"<pre>{err_text}</pre>",
                         parse_mode="HTML",
                     )
                 except Exception:
